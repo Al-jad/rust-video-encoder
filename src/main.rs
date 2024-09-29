@@ -1,9 +1,16 @@
 mod api;
+mod schemas;
+
+use crate::api::encode::__path_upload_video;
 use crate::api::task::__path_get_task;
 use api::task::get_task;
 use actix_web::{App, HttpServer, middleware::Logger};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
+use crate::api::encode::upload_video;
+
+
+
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -15,7 +22,13 @@ async fn main() -> std::io::Result<()> {
     #[derive(OpenApi)]
     #[openapi(
         paths(
-            get_task
+            get_task,
+            upload_video
+        ),
+        components(
+            schemas(
+                schemas::FileUpload
+            )
         )
     )]
     struct ApiDoc;
@@ -26,6 +39,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(logger)
             .service(get_task)
+            .service(upload_video)
             .service(SwaggerUi::new("/docs/{_:.*}").url(
                 "/api-docs/openapi.json",
                 openapi.clone(),
