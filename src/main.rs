@@ -1,5 +1,6 @@
 mod api;
 mod schemas;
+mod utils;
 
 use crate::api::encode::__path_upload_video;
 use crate::api::task::__path_get_task;
