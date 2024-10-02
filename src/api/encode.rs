@@ -45,7 +45,7 @@ fn compress_video(uploaded_name: String) -> Result<(), String> {
 
 fn convert_to_hls(uploaded_name: String) -> Result<(), Box<dyn std::error::Error>> {
     let input_path = format!("temp_results/{}.mp4", uploaded_name);
-    let output_path = format!("hls/{}", uploaded_name);
+    let output_path = format!("hls/{}.m3u8", uploaded_name);
 
 
     let status = Command::new("ffmpeg")
