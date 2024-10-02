@@ -10,7 +10,7 @@ use futures::StreamExt;
 
 fn compress_video(uploaded_name: String) -> Result<(), String> {
     let input_path = format!("uploads/{}", uploaded_name);
-    let output_path = format!("temp_results/{}", uploaded_name);
+    let output_path = format!("temp_results/{}.mp4", uploaded_name);
     if !Path::new(&input_path).exists() {
         return Err(format!("Input file not found: {}", input_path));
     }
@@ -44,7 +44,7 @@ fn compress_video(uploaded_name: String) -> Result<(), String> {
 }
 
 fn convert_to_hls(uploaded_name: String) -> Result<(), Box<dyn std::error::Error>> {
-    let input_path = format!("temp_results/{}", uploaded_name);
+    let input_path = format!("temp_results/{}.mp4", uploaded_name);
     let output_path = format!("hls/{}", uploaded_name);
 
 
