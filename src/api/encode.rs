@@ -9,6 +9,35 @@ use futures::StreamExt;
 
 
 
+fn generate_thumbnails(uploaded_name: String) -> Result<(), String> {
+    let input_path = format!("uploads/{}/{}", uploaded_name, uploaded_name);
+    let thumbnail_output_pattern = format!("uploads/{}/thumbnail-%02d.png", uploaded_name);
+
+    if !Path::new(&input_path).exists() {
+        return Err(format!("Input file not found: {}", input_path));
+    }
+
+    let output = Command::new("ffmpeg")
+        .arg("-i")
+        .arg(&input_path)
+        .arg("-vf")
+        .arg("thumbnail,select='not(mod(n,50))'")
+        .arg("-frames:v")
+        .arg("5")
+        .arg(&thumbnail_output_pattern)
+        .output()
+        .map_err(|e| format!("Failed to execute ffmpeg: {}", e))?;
+
+    if output.status.success() {
+        println!("Thumbnails generated successfully in: {}", thumbnail_output_pattern);
+        Ok(())
+    } else {
+        Err(format!(
+            "Error generating thumbnails: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ))
+    }
+}
 
 fn compress_video(uploaded_name: String) -> Result<(), String> {
     let input_path = format!("uploads/{}/{}", uploaded_name, uploaded_name);
@@ -171,6 +200,14 @@ pub async fn upload_video(mut payload: Multipart) -> impl Responder {
 
     if let Err(e) = convert_to_hls(filename.to_string()) {
         eprintln!("Error: {}", e);
+    }
+
+    match generate_thumbnails(filename.to_string()) {
+        Ok(_) => println!("Thumbnails generated successfully"),
+        Err(e) => {
+            println!("Error generating thumbnails: {}", e);
+            return HttpResponse::InternalServerError().finish();
+        }
     }
 
     HttpResponse::Ok().body("Video uploaded successfully!")
