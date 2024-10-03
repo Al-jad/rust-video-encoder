@@ -2,103 +2,134 @@ use actix_web::{post, HttpResponse, Responder};
 use actix_multipart::Multipart;
 use uuid::Uuid;
 use std::fs::File;
-use std::io::Write;
+use std::io::{Error, Write};
 use std::path::{Path};
 use std::process::Command;
 use futures::StreamExt;
 
 
+
+
 fn compress_video(uploaded_name: String) -> Result<(), String> {
-    let input_path = format!("uploads/{}", uploaded_name);
-    let output_path = format!("temp_results/{}.mp4", uploaded_name);
+    let input_path = format!("uploads/{}/{}", uploaded_name, uploaded_name);
     if !Path::new(&input_path).exists() {
         return Err(format!("Input file not found: {}", input_path));
     }
-    let output = Command::new("ffmpeg")
-        .arg("-fflags")
-        .arg("+genpts")
-        .arg("-i")
-        .arg(&input_path)
-        .arg("-analyzeduration")
-        .arg("100M")
-        .arg("-probesize")
-        .arg("50M")
-        .arg("-pix_fmt")
-        .arg("yuv420p")
-        .arg("-vcodec")
-        .arg("libx264")
-        .arg("-crf")
-        .arg("28")
-        .arg(&output_path)
-        .output()
-        .map_err(|e| format!("Failed to execute ffmpeg: {}", e))?;
-    if output.status.success() {
-        println!("Video compressed successfully: {}", output_path);
-        Ok(())
-    } else {
-        Err(format!(
-            "Error compressing video: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ))
+
+    let sizes = vec![
+        ("high", "23"),
+        ("mid", "28"),
+        ("low", "35"),
+    ];
+
+
+    for (size_name, crf_value) in &sizes {
+        let output_path = format!("uploads/{}/{}_{}.mp4", uploaded_name, uploaded_name, size_name);
+        let output = Command::new("ffmpeg")
+            .arg("-fflags")
+            .arg("+genpts")
+            .arg("-i")
+            .arg(&input_path)
+            .arg("-analyzeduration")
+            .arg("100M")
+            .arg("-probesize")
+            .arg("50M")
+            .arg("-pix_fmt")
+            .arg("yuv420p")
+            .arg("-vcodec")
+            .arg("libx264")
+            .arg("-crf")
+            .arg(crf_value)
+            .arg(&output_path)
+            .output()
+            .map_err(|e| format!("Failed to execute ffmpeg for {} quality: {}", size_name, e))?;
+
+        if output.status.success() {
+            println!("Video compressed successfully: {}", output_path);
+        } else {
+            return Err(format!(
+                "Error compressing video for {} quality: {}",
+                size_name,
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
     }
-}
-
-fn convert_to_hls(uploaded_name: String) -> Result<(), Box<dyn std::error::Error>> {
-    let input_path = format!("temp_results/{}.mp4", uploaded_name);
-    let output_path = format!("hls/{}.m3u8", uploaded_name);
-
-
-    let status = Command::new("ffmpeg")
-        .arg("-i")
-        .arg(&input_path)
-        .arg("-preset")
-        .arg("veryfast")
-        .arg("-g")
-        .arg("30")
-        .arg("-sc_threshold")
-        .arg("0")
-        .arg("-f")
-        .arg("hls")
-        .arg("-hls_time")
-        .arg("10") // Segment length in seconds
-        .arg("-hls_list_size")
-        .arg("0") // Infinite playlist
-        .arg("-hls_flags")
-        .arg("delete_segments")
-        .arg(&output_path)
-        .status()?;
-
-    // Check if FFmpeg executed successfully
-    if !status.success() {
-        eprintln!("FFmpeg failed to convert the video.");
-        return Err("FFmpeg conversion failed".into());
-    }
-
-    println!("Video successfully converted to HLS format.");
+    create_master_playlist(&sizes, &format!("uploads/{}", uploaded_name), &uploaded_name).unwrap();
     Ok(())
 }
 
+fn create_master_playlist(
+    sizes: &Vec<(&str, &str)>,
+    hls_output_dir: &str,
+    uploaded_name: &str,
+) -> Result<(), Error> {
+    let master_playlist_path = format!("{}/master.m3u8", hls_output_dir);
+    let mut master_playlist = File::create(&master_playlist_path)?;
 
+    writeln!(master_playlist, "#EXTM3U")?;
 
+    for (size_name, bitrate) in sizes {
+        writeln!(
+            master_playlist,
+            "#EXT-X-STREAM-INF:BANDWIDTH={}",
+            bitrate
+        )?;
+        writeln!(
+            master_playlist,
+            "{}_{}.m3u8",
+            uploaded_name, size_name
+        )?;
+    }
 
-//
-//
-//
-// fn transcode_video_into_HLS(uploaded_name: String) -> std::process::Output {
-//     let output = std::process::Command::new("ffmpeg")
-//         .args(&["-i", format!("uploads/{}.mp4", uploaded_name).as_str(), "-c:v", "libx264", "-crf", "24", "-c:a", "aac", "-strict", "experimental", "-f", "hls", format!("uploads/{}.m3u8", uploaded_name).as_str()])
-//         .output()
-//         .expect("failed to execute process");
-//     output
-// }
-//
-// fn upload_video_to_s3(uploaded_name: String) -> std::process::Output {
-//     let output = std::process::Command::new("aws")
-//         .args(&["s3", "cp", format!("uploads/{}.m3u8", uploaded_name).as_str(), "s3://bucket-name"])
-//         .output()
-//         .expect("failed to execute process");
-//     output
-// }
+    println!("Generated master playlist: {}", master_playlist_path);
+
+    Ok(())
+}
+
+fn convert_to_hls(uploaded_name: String) -> Result<(), Box<dyn std::error::Error>> {
+    let sizes = vec![
+        ("high", "23"),
+        ("mid", "28"),
+        ("low", "35"),
+    ];
+
+    let hls_output_dir = format!("uploads/{}", uploaded_name);
+
+    for (size_name, _) in &sizes {
+        let input_path = format!("uploads/{}/{}_{}.mp4", uploaded_name, uploaded_name, size_name);
+
+        let output_path = format!("{}/{}_{}.m3u8", hls_output_dir, uploaded_name, size_name);
+
+        if !Path::new(&input_path).exists() {
+            return Err(format!("Compressed video not found for {} quality: {}", size_name, input_path).into());
+        }
+
+        let output = Command::new("ffmpeg")
+            .arg("-i")
+            .arg(&input_path)
+            .arg("-profile:v")
+            .arg("baseline")
+            .arg("-start_number")
+            .arg("0")
+            .arg("-hls_time")
+            .arg("10")
+            .arg("-hls_list_size")
+            .arg("0")
+            .arg("-f")
+            .arg("hls")
+            .arg(&output_path)
+            .output()?
+            .stdout;
+
+        println!(
+            "Converted {} quality video to HLS format: {}",
+            size_name, output_path
+        );
+    }
+
+    Ok(())
+
+}
 
 
 
@@ -117,8 +148,13 @@ pub async fn upload_video(mut payload: Multipart) -> impl Responder {
 
     let target_directory = "uploads";
     let filename = Uuid::new_v4();
+    // create a direcotry inside the target directory with filename
+    // let target_directory = format!("{}/{}", target_directory, filename);
+    // std::fs::create_dir_all(&target_directory).expect("Failed to create directory");
+
     while let Some(Ok(mut field)) = payload.next().await {
-        let filepath = format!("{}/{}", target_directory, filename);
+        let filepath = format!("{}/{}/{}", target_directory, filename, filename);
+        std::fs::create_dir_all(&format!("{}/{}", target_directory, filename)).expect("Failed to create directory");
         let mut file = File::create(filepath).expect("Failed to create file");
         while let Some(Ok(bytes)) = field.next().await {
             file.write_all(&bytes).expect("Failed to write bytes to file");
